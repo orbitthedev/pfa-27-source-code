@@ -1,0 +1,8 @@
+{
+  "name": "PFA 27 - Pen Fight 27",
+  "description": "The ultimate competitive finger-flicking pen fight simulation with realistic rigid-body physics, online multiplayer rankings, tournament brackets, and Geometry Box pack unboxing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

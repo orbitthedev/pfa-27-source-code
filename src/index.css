@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: #080a0f;
+    color: #f8fafc;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow-x: hidden;
+    touch-action: manipulation;
+  }
+}
+
+.font-broadcast {
+  font-family: 'Barlow Condensed', -apple-system, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.font-display {
+  font-family: 'Outfit', sans-serif;
+}
+
+/* Brutalist Hard-Edge Shadows & Borders */
+.shadow-brutal-yellow {
+  box-shadow: 4px 4px 0px 0px #ffe500;
+}
+
+.shadow-brutal-white {
+  box-shadow: 4px 4px 0px 0px #ffffff;
+}
+
+.shadow-brutal-black {
+  box-shadow: 4px 4px 0px 0px #000000;
+}
+
+.shadow-brutal-red {
+  box-shadow: 4px 4px 0px 0px #ef4444;
+}
+
+.shadow-brutal-blue {
+  box-shadow: 4px 4px 0px 0px #38bdf8;
+}
+
+/* Slanted Chamfer Cuts */
+.clip-chamfer {
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+
+.clip-tag {
+  clip-path: polygon(0 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+}
+
+.clip-badge-slant {
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+}
+
+/* Schoolyard Blueprint & Graph Paper Grids */
+.bg-graph-paper {
+  background-size: 24px 24px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+}
+
+.bg-hazard-stripes {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 229, 0, 0.12),
+    rgba(255, 229, 0, 0.12) 10px,
+    transparent 10px,
+    transparent 20px
+  );
+}
+
+.bg-hazard-stripes-bold {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    #ffe500,
+    #ffe500 12px,
+    #000000 12px,
+    #000000 24px
+  );
+}
+
+/* Gritty Chalk Doodles */
+.text-stroke-black {
+  -webkit-text-stroke: 1.5px black;
+}

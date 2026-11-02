@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Default Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Hardened Admin Verification: only the authenticated user email from runtime with verified email
+    function isAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        request.auth.token.email.lower() == 'samwdoesthings@gmail.com';
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll([
+        'userId', 'username', 'email', 'level', 'xp', 'paperclips',
+        'division', 'equippedPenId', 'equippedSkinId', 'equippedFlickStyleId',
+        'unlockedPens', 'unlockedSkins', 'unlockedFlickStyles', 'createdAt', 'updatedAt'
+      ]) &&
+      data.userId is string && data.userId == request.auth.uid && data.userId.size() <= 128 &&
+      data.username is string && data.username.size() > 0 && data.username.size() <= 64 &&
+      data.email is string && data.email.size() > 0 && data.email.size() <= 256 &&
+      data.level is number && data.level >= 1 && data.level <= 100 &&
+      data.xp is number && data.xp >= 0 &&
+      data.paperclips is number && data.paperclips >= 0 &&
+      data.division is number && data.division >= 1 && data.division <= 10 &&
+      data.equippedPenId is string && data.equippedPenId.size() <= 64 &&
+      data.equippedSkinId is string && data.equippedSkinId.size() <= 64 &&
+      data.equippedFlickStyleId is string && data.equippedFlickStyleId.size() <= 64 &&
+      data.unlockedPens is list && data.unlockedPens.size() <= 50 &&
+      data.unlockedSkins is list && data.unlockedSkins.size() <= 100 &&
+      data.unlockedFlickStyles is list && data.unlockedFlickStyles.size() <= 20 &&
+      (!('role' in data) || (data.role is string && (data.role == 'PLAYER' || (data.role == 'ADMIN' && isAdmin())))) &&
+      (!('isAdmin' in data) || (data.isAdmin is bool && (data.isAdmin == false || (data.isAdmin == true && isAdmin())))) &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    // User Profile Document Path
+    match /users/{userId} {
+      // Individual user can read their own account profile, or admin can inspect
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+
+      // Prevent list query scraping of all user profiles/emails, unless admin
+      allow list: if isAdmin();
+
+      // Create new account profile
+      allow create: if isSignedIn() &&
+        isValidId(userId) &&
+        request.auth.uid == userId &&
+        isValidUser(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      // Update existing account profile (game progress, unlocks, balance)
+      allow update: if isSignedIn() &&
+        isValidId(userId) &&
+        request.auth.uid == userId &&
+        isValidUser(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+
+      // Disallow client deletion
+      allow delete: if false;
+    }
+  }
+}

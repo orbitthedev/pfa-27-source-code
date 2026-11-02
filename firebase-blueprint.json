@@ -1,0 +1,133 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Authenticated player profile, inventory, and rankings in PFA 27",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the player",
+          "maxLength": 128
+        },
+        "username": {
+          "type": "string",
+          "description": "Display name of the pen fight player",
+          "maxLength": 64
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of the player",
+          "maxLength": 256
+        },
+        "level": {
+          "type": "number",
+          "description": "Current player level"
+        },
+        "xp": {
+          "type": "number",
+          "description": "Current player experience points"
+        },
+        "xpNextLevel": {
+          "type": "number",
+          "description": "XP threshold required for next level"
+        },
+        "paperclips": {
+          "type": "number",
+          "description": "Current balance of earned paperclips"
+        },
+        "division": {
+          "type": "number",
+          "description": "Current competitive division (10 to 1)"
+        },
+        "divisionPoints": {
+          "type": "number",
+          "description": "Current division rank points (0 to 100)"
+        },
+        "totalWins": {
+          "type": "number",
+          "description": "Total matches won"
+        },
+        "totalMatches": {
+          "type": "number",
+          "description": "Total matches played"
+        },
+        "winStreak": {
+          "type": "number",
+          "description": "Current consecutive win streak"
+        },
+        "equippedPenId": {
+          "type": "string",
+          "description": "ID of currently equipped pen",
+          "maxLength": 64
+        },
+        "equippedSkinId": {
+          "type": "string",
+          "description": "ID of currently equipped pen skin",
+          "maxLength": 64
+        },
+        "equippedFlickStyleId": {
+          "type": "string",
+          "description": "ID of currently equipped finger-flicking style",
+          "maxLength": 64
+        },
+        "unlockedPens": {
+          "type": "array",
+          "description": "List of unlocked real pen brand IDs"
+        },
+        "unlockedSkins": {
+          "type": "array",
+          "description": "List of unlocked geometry box skin IDs"
+        },
+        "unlockedFlickStyles": {
+          "type": "array",
+          "description": "List of unlocked flicking style IDs"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["ADMIN", "PLAYER"],
+          "description": "Role and privileges of the player"
+        },
+        "isAdmin": {
+          "type": "boolean",
+          "description": "Whether the user has developer/admin privileges"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of profile creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of last profile update"
+        }
+      },
+      "required": [
+        "userId",
+        "username",
+        "email",
+        "level",
+        "xp",
+        "paperclips",
+        "division",
+        "equippedPenId",
+        "equippedSkinId",
+        "equippedFlickStyleId",
+        "unlockedPens",
+        "unlockedSkins",
+        "unlockedFlickStyles",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Stores individual player account profile, paperclip wallet, and pen collection"
+    }
+  }
+}
