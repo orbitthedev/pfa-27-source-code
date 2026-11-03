@@ -888,5 +888,107 @@ export const ADMIN_MASTER_PROFILE: PlayerProfile = {
   unlockedFlickStyles: ALL_FLICK_STYLE_IDS,
   role: 'ADMIN',
   isAdmin: true,
+  platform: 'desktop',
+  crossplaySetting: 'CROSSPLAY_ENABLED',
 };
+
+export interface BotDifficultyConfig {
+  id: 'DUMMY' | 'ROOKIE' | 'NORMAL' | 'HARD' | 'CYBORG_APEX';
+  name: string;
+  subtitle: string;
+  description: string;
+  badge: string;
+  badgeColor: string;
+  avatar: string;
+  aimVarianceRad: number;
+  powerErrorRange: number;
+  edgeAwareness: boolean;
+  canSuicide: boolean;
+  usesCurve: boolean;
+  spinTargeting: boolean;
+  defaultPenId: string;
+}
+
+export const BOT_DIFFICULTIES: BotDifficultyConfig[] = [
+  {
+    id: 'DUMMY',
+    name: 'Class Dunce (Dummy)',
+    subtitle: 'Stupider // Zero Physics Sense',
+    description: 'Wildly wobbly aim (±65°), random misfires, underpowers shots or flings itself straight off the desk rim.',
+    badge: '🤪 DUMMY',
+    badgeColor: 'bg-red-500 text-black border-black',
+    avatar: '🤪',
+    aimVarianceRad: 1.15,
+    powerErrorRange: 0.7,
+    edgeAwareness: false,
+    canSuicide: true,
+    usesCurve: false,
+    spinTargeting: false,
+    defaultPenId: 'bic_cristal',
+  },
+  {
+    id: 'ROOKIE',
+    name: 'Backbencher (Rookie)',
+    subtitle: 'Novice // Inaccurate & Clumsy',
+    description: 'Shaky ±25° aim, misjudges long-range friction, occasionally rolls off the edge when pressurized.',
+    badge: '👶 ROOKIE',
+    badgeColor: 'bg-orange-500 text-black border-black',
+    avatar: '👶',
+    aimVarianceRad: 0.45,
+    powerErrorRange: 0.35,
+    edgeAwareness: false,
+    canSuicide: true,
+    usesCurve: false,
+    spinTargeting: false,
+    defaultPenId: 'pilot_g2',
+  },
+  {
+    id: 'NORMAL',
+    name: 'Desk Striker (Balanced)',
+    subtitle: 'Standard // Solid Fundamentals',
+    description: 'Disciplined ±8° aim, basic power calculation, direct center shots with consistent table presence.',
+    badge: '⚡ NORMAL',
+    badgeColor: 'bg-[#ffe500] text-black border-black',
+    avatar: '🎯',
+    aimVarianceRad: 0.14,
+    powerErrorRange: 0.12,
+    edgeAwareness: true,
+    canSuicide: false,
+    usesCurve: false,
+    spinTargeting: false,
+    defaultPenId: 'pilot_g2',
+  },
+  {
+    id: 'HARD',
+    name: 'Valedictorian (Hard)',
+    subtitle: 'Smarter // Calculated Push Angles',
+    description: 'Laser-focused ±2° aim, checks boundary distance, strikes to push player toward the nearest desk edge.',
+    badge: '🧠 HARD',
+    badgeColor: 'bg-blue-500 text-white border-black',
+    avatar: '🧠',
+    aimVarianceRad: 0.035,
+    powerErrorRange: 0.05,
+    edgeAwareness: true,
+    canSuicide: false,
+    usesCurve: true,
+    spinTargeting: true,
+    defaultPenId: 'parker_jotter',
+  },
+  {
+    id: 'CYBORG_APEX',
+    name: 'Neural Apex (Grandmaster)',
+    subtitle: 'Mastermind // Unbeatable Physics AI',
+    description: 'Zero aim error. Calculates impulse vectors, conservation of momentum, tip-spin strikes, and bank-shots. Never suicides.',
+    badge: '🤖 CYBORG APEX',
+    badgeColor: 'bg-purple-600 text-white border-black',
+    avatar: '🤖',
+    aimVarianceRad: 0.0,
+    powerErrorRange: 0.0,
+    edgeAwareness: true,
+    canSuicide: false,
+    usesCurve: true,
+    spinTargeting: true,
+    defaultPenId: 'rotring_600',
+  },
+];
 

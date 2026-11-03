@@ -25,6 +25,7 @@ export const TournamentBracketView: React.FC<TournamentBracketViewProps> = ({
   const [passcodeInputs, setPasscodeInputs] = useState<Record<string, string>>({});
   const [unlockedClosed, setUnlockedClosed] = useState<Record<string, boolean>>({});
   const [passcodeError, setPasscodeError] = useState<string | null>(null);
+  const [mobileRoundTab, setMobileRoundTab] = useState<number>(1);
 
   const selectedTourney =
     tournaments.find((t) => t.id === selectedTourneyId) || tournaments[0];
@@ -192,10 +193,47 @@ export const TournamentBracketView: React.FC<TournamentBracketViewProps> = ({
             )}
           </div>
 
+          {/* Mobile Round Switcher (< md) */}
+          <div className="md:hidden flex items-center justify-between gap-1 p-2 bg-neutral-100 border-2 border-black">
+            <button
+              onClick={() => {
+                sounds.playClick();
+                setMobileRoundTab(1);
+              }}
+              className={`flex-1 py-1.5 text-xs font-broadcast font-black uppercase border border-black transition-all ${
+                mobileRoundTab === 1 ? 'bg-[#ffe500] text-black shadow-sm' : 'bg-white text-black'
+              }`}
+            >
+              1: Quarterfinals
+            </button>
+            <button
+              onClick={() => {
+                sounds.playClick();
+                setMobileRoundTab(2);
+              }}
+              className={`flex-1 py-1.5 text-xs font-broadcast font-black uppercase border border-black transition-all ${
+                mobileRoundTab === 2 ? 'bg-[#ffe500] text-black shadow-sm' : 'bg-white text-black'
+              }`}
+            >
+              2: Semifinals
+            </button>
+            <button
+              onClick={() => {
+                sounds.playClick();
+                setMobileRoundTab(3);
+              }}
+              className={`flex-1 py-1.5 text-xs font-broadcast font-black uppercase border border-black transition-all ${
+                mobileRoundTab === 3 ? 'bg-[#ffe500] text-black shadow-sm' : 'bg-white text-black'
+              }`}
+            >
+              3: Grand Final
+            </button>
+          </div>
+
           {/* 3-Column Bracket Tree */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6 bg-white border-4 border-black shadow-brutal-yellow overflow-x-auto">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-4 sm:p-6 bg-white border-4 border-black shadow-brutal-yellow">
             {/* Column 1: Quarterfinals */}
-            <div className="space-y-4">
+            <div className={`space-y-4 ${mobileRoundTab === 1 ? 'block' : 'hidden md:block'}`}>
               <div className="font-mono text-xs font-black uppercase tracking-wider text-black pb-2 border-b-2 border-black flex justify-between">
                 <span>QUARTER-FINALS</span>
                 <span>8 COMBATANTS</span>
@@ -233,12 +271,12 @@ export const TournamentBracketView: React.FC<TournamentBracketViewProps> = ({
             </div>
 
             {/* Column 2: Semi-Finals */}
-            <div className="space-y-4">
+            <div className={`space-y-4 ${mobileRoundTab === 2 ? 'block' : 'hidden md:block'}`}>
               <div className="font-mono text-xs font-black uppercase tracking-wider text-black pb-2 border-b-2 border-black flex justify-between">
                 <span>SEMI-FINALS</span>
                 <span>4 COMBATANTS</span>
               </div>
-              <div className="space-y-6 pt-3">
+              <div className="space-y-4 pt-1 sm:pt-3">
                 {sfMatches.map((match) => (
                   <div
                     key={match.id}
@@ -267,22 +305,22 @@ export const TournamentBracketView: React.FC<TournamentBracketViewProps> = ({
             </div>
 
             {/* Column 3: Grand Final */}
-            <div className="space-y-4">
+            <div className={`space-y-4 ${mobileRoundTab === 3 ? 'block' : 'hidden md:block'}`}>
               <div className="font-mono text-xs font-black uppercase tracking-wider text-black pb-2 border-b-2 border-black flex items-center justify-between">
                 <span>GRAND FINAL</span>
                 <Trophy className="w-4 h-4 text-black" />
               </div>
-              <div className="pt-10">
+              <div className="pt-2 sm:pt-10">
                 {finalMatches.map((match) => (
                   <div
                     key={match.id}
-                    className="p-6 bg-[#ffe500] border-4 border-black shadow-brutal-black text-center"
+                    className="p-4 sm:p-6 bg-[#ffe500] border-4 border-black shadow-brutal-black text-center"
                   >
                     <Trophy className="w-10 h-10 text-black mx-auto mb-2" />
                     <div className="font-mono text-xs font-black uppercase tracking-widest text-black mb-3">
                       {selectedTourney.trophyName}
                     </div>
-                    <div className="flex items-center justify-between font-broadcast text-xl font-black italic text-black border-2 border-black bg-white p-2">
+                    <div className="flex items-center justify-between font-broadcast text-lg sm:text-xl font-black italic text-black border-2 border-black bg-white p-2">
                       <span>{match.player1.name}</span>
                       <span className="bg-[#ffe500] px-1 border border-black">VS</span>
                       <span>{match.player2.name}</span>

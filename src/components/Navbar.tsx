@@ -6,7 +6,7 @@
 import React from 'react';
 import { GameView, PlayerProfile } from '../types/game';
 import { sounds } from '../utils/audio';
-import { Volume2, VolumeX, Flame, ShieldCheck } from 'lucide-react';
+import { Volume2, VolumeX, Flame, ShieldCheck, Bot } from 'lucide-react';
 
 interface NavbarProps {
   currentView: GameView;
@@ -19,6 +19,10 @@ interface NavbarProps {
   onSignOut?: () => void;
   isAdminUser?: boolean;
   onOpenAdminPanel?: () => void;
+  platform?: 'mobile' | 'desktop';
+  crossplaySetting?: 'CROSSPLAY_ENABLED' | 'SAME_PLATFORM_ONLY';
+  onToggleCrossplay?: () => void;
+  onOpenBotLab?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -32,6 +36,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSignOut,
   isAdminUser,
   onOpenAdminPanel,
+  platform = 'desktop',
+  crossplaySetting = 'CROSSPLAY_ENABLED',
+  onToggleCrossplay,
+  onOpenBotLab,
 }) => {
   const navItems: { view: GameView; label: string }[] = [
     { view: 'HUB', label: 'Match Center' },
@@ -116,6 +124,44 @@ export const Navbar: React.FC<NavbarProps> = ({
           <span className="text-slate-400">LVL</span>
           <span className="text-white">{profile.level}</span>
         </div>
+
+        {/* Crossplay & Platform Badge */}
+        <button
+          onClick={() => {
+            sounds.playClick();
+            onToggleCrossplay?.();
+          }}
+          className={`flex items-center gap-1.5 px-2 py-1 border-2 text-[11px] font-mono font-bold tracking-tight cursor-pointer transition-all ${
+            crossplaySetting === 'CROSSPLAY_ENABLED'
+              ? 'bg-black/80 border-[#ffe500]/60 text-slate-200 hover:border-[#ffe500]'
+              : 'bg-black/90 border-blue-500/60 text-blue-300 hover:border-blue-400'
+          }`}
+          title={`Platform: ${platform.toUpperCase()} | Crossplay: ${
+            crossplaySetting === 'CROSSPLAY_ENABLED' ? 'ON (All Platforms)' : 'OFF (Same Platform Only)'
+          }. Click to toggle.`}
+        >
+          <span className="text-xs">{platform === 'mobile' ? '📱' : '🖥️'}</span>
+          <span className="hidden sm:inline uppercase text-[10px] tracking-wider text-slate-400">
+            {platform}
+          </span>
+          <span className="text-slate-600 hidden sm:inline">•</span>
+          <span className={crossplaySetting === 'CROSSPLAY_ENABLED' ? 'text-[#ffe500]' : 'text-blue-400'}>
+            {crossplaySetting === 'CROSSPLAY_ENABLED' ? 'CROSSPLAY: ON' : 'SOLO PLATFORM'}
+          </span>
+        </button>
+
+        {/* AI Bot Sparring Lab Quick Launcher */}
+        <button
+          onClick={() => {
+            sounds.playClick();
+            onOpenBotLab?.();
+          }}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white border-2 border-white font-broadcast font-bold text-xs uppercase cursor-pointer shadow-brutal-black transition-all shrink-0"
+          title="Open AI Bot Sparring Lab (Exclusive Bot Mode)"
+        >
+          <Bot className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Bot Lab</span>
+        </button>
 
         {/* Developer Admin Status Badge / Modal Trigger */}
         {(isAdminUser || profile.isAdmin || profile.role === 'ADMIN') && (

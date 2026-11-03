@@ -7,13 +7,14 @@ import React from 'react';
 import { GameView, PlayerProfile } from '../types/game';
 import { PENS_CATALOG, FLICK_STYLES } from '../data/initialData';
 import { sounds } from '../utils/audio';
-import { Play, Trophy, Package, Users, ArrowRight, Zap, Flame, Scale, Layers } from 'lucide-react';
+import { Play, Trophy, Package, Users, ArrowRight, Zap, Flame, Scale, Layers, Bot, Cpu } from 'lucide-react';
 
 interface HubDashboardProps {
   profile: PlayerProfile;
   onNavigate: (view: GameView) => void;
   onQuickRankedMatch: () => void;
   onStartPassAndPlay: () => void;
+  onOpenBotLab: () => void;
 }
 
 export const HubDashboard: React.FC<HubDashboardProps> = ({
@@ -21,6 +22,7 @@ export const HubDashboard: React.FC<HubDashboardProps> = ({
   onNavigate,
   onQuickRankedMatch,
   onStartPassAndPlay,
+  onOpenBotLab,
 }) => {
   const equippedPen =
     PENS_CATALOG.find((p) => p.id === profile.equippedPenId) || PENS_CATALOG[0];
@@ -116,13 +118,13 @@ export const HubDashboard: React.FC<HubDashboardProps> = ({
             </div>
 
             {/* Match CTA buttons */}
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col sm:flex-row gap-2.5">
               <button
                 onClick={() => {
                   sounds.playClick();
                   onQuickRankedMatch();
                 }}
-                className="flex-1 flex items-center justify-center gap-2 py-3.5 px-5 bg-[#ffe500] hover:bg-[#ebd300] text-black font-broadcast font-black text-base uppercase tracking-wider border-2 border-black shadow-brutal-white transition-transform hover:-translate-y-0.5 cursor-pointer"
+                className="flex-1 flex items-center justify-center gap-2 py-3.5 px-4 bg-[#ffe500] hover:bg-[#ebd300] text-black font-broadcast font-black text-sm sm:text-base uppercase tracking-wider border-2 border-black shadow-brutal-white transition-transform hover:-translate-y-0.5 active:scale-95 cursor-pointer"
               >
                 <Play className="w-4 h-4 fill-black" />
                 <span>Ranked Duel</span>
@@ -131,9 +133,20 @@ export const HubDashboard: React.FC<HubDashboardProps> = ({
               <button
                 onClick={() => {
                   sounds.playClick();
+                  onOpenBotLab();
+                }}
+                className="flex items-center justify-center gap-2 py-3.5 px-4 bg-purple-600 hover:bg-purple-500 text-white font-broadcast font-black text-sm sm:text-base uppercase tracking-wider border-2 border-white shadow-brutal-black transition-all active:scale-95 cursor-pointer"
+              >
+                <Bot className="w-4 h-4" />
+                <span>AI Bot Lab</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  sounds.playClick();
                   onStartPassAndPlay();
                 }}
-                className="flex items-center justify-center gap-2 py-3.5 px-4 bg-white/10 hover:bg-white/20 text-white font-broadcast font-bold text-base uppercase tracking-wider border-2 border-white/30 transition-colors cursor-pointer"
+                className="flex items-center justify-center gap-2 py-3.5 px-4 bg-white/10 hover:bg-white/20 text-white font-broadcast font-bold text-sm sm:text-base uppercase tracking-wider border-2 border-white/30 transition-all active:scale-95 cursor-pointer"
               >
                 <Users className="w-4 h-4" />
                 <span>Pass & Play</span>
@@ -143,8 +156,8 @@ export const HubDashboard: React.FC<HubDashboardProps> = ({
         </div>
       </div>
 
-      {/* 4 Brutalist Feature Blocks */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      {/* 5 Brutalist Feature Blocks */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         {/* Box 1: Tournaments */}
         <div
           onClick={() => {
@@ -253,14 +266,44 @@ export const HubDashboard: React.FC<HubDashboardProps> = ({
               </span>
             </div>
             <h3 className="font-broadcast text-2xl font-black italic uppercase text-white group-hover:text-[#ffe500] transition-colors">
-              Online Matchmaking
+              Multiplayer
             </h3>
             <p className="text-xs text-slate-400 font-sans mt-2">
-              Live WebSocket room duel codes, division promotions, and global leaderboard.
+              Live WebSocket room duel codes, division promotions, and human-only leaderboard.
             </p>
           </div>
           <div className="mt-5 pt-3 border-t border-white/10 flex items-center justify-between text-xs font-mono font-bold text-[#ffe500]">
             <span>LOBBY & DUELS</span>
+            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+          </div>
+        </div>
+
+        {/* Box 5: Exclusive AI Bot Lab */}
+        <div
+          onClick={() => {
+            sounds.playClick();
+            onOpenBotLab();
+          }}
+          className="p-5 bg-[#150f1f] border-2 border-purple-500/40 hover:border-purple-400 shadow-brutal-black transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div>
+            <div className="flex justify-between items-start mb-4">
+              <div className="w-10 h-10 bg-purple-600 text-white border-2 border-black flex items-center justify-center font-black shadow-brutal-black">
+                <Bot className="w-5 h-5" />
+              </div>
+              <span className="text-[10px] font-mono font-bold uppercase bg-red-600 text-white px-2 py-0.5 border border-white">
+                BOT MODE
+              </span>
+            </div>
+            <h3 className="font-broadcast text-2xl font-black italic uppercase text-white group-hover:text-purple-300 transition-colors">
+              AI Bot Lab
+            </h3>
+            <p className="text-xs text-slate-300 font-sans mt-2">
+              Isolated bot mode. Calibrate AI: Dunce (Dummy) to Neural Apex (Grandmaster). Banned from main ladder.
+            </p>
+          </div>
+          <div className="mt-5 pt-3 border-t border-white/10 flex items-center justify-between text-xs font-mono font-bold text-purple-400">
+            <span>SPAR WITH BOTS</span>
             <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
           </div>
         </div>

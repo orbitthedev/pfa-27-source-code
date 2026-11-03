@@ -26,6 +26,7 @@ import {
   ALL_SKIN_IDS,
   ALL_FLICK_STYLE_IDS,
 } from '../data/initialData';
+import { detectDevicePlatform } from '../utils/device';
 
 interface AuthContextType {
   user: FirebaseUser | null;
@@ -60,7 +61,50 @@ const DEFAULT_STARTER_PROFILE: PlayerProfile = {
   unlockedFlickStyles: ['style_classic_thumb'],
   role: 'PLAYER',
   isAdmin: false,
+  platform: detectDevicePlatform(),
+  crossplaySetting: 'CROSSPLAY_ENABLED',
 };
+
+const getLocalProfile = (uid: string): PlayerProfile | null => {
+  try {
+    const raw = localStorage.getItem(`pfa27_profile_${uid}`);
+    if (raw) return JSON.parse(raw);
+  } catch (err) {
+    console.warn('Error reading local profile cache:', err);
+  }
+  return null;
+};
+
+const saveLocalProfile = (uid: string, p: PlayerProfile) => {
+  try {
+    localStorage.setItem(`pfa27_profile_${uid}`, JSON.stringify(p));
+  } catch (err) {
+    console.warn('Error persisting local profile cache:', err);
+  }
+};
+
+const getAdminProfile = (): PlayerProfile => ({
+  username: 'Admin Developer (Sam)',
+  level: 99,
+  xp: 999999,
+  xpNextLevel: 1000000,
+  paperclips: 999999,
+  division: 1,
+  divisionPoints: 100,
+  totalWins: 777,
+  totalMatches: 777,
+  winStreak: 777,
+  equippedPenId: 'rotring_600',
+  equippedSkinId: 'skin_rotring_gold',
+  equippedFlickStyleId: 'style_knuckle_cannon',
+  unlockedPens: [...ALL_PEN_IDS],
+  unlockedSkins: [...ALL_SKIN_IDS],
+  unlockedFlickStyles: [...ALL_FLICK_STYLE_IDS],
+  role: 'ADMIN',
+  isAdmin: true,
+  platform: detectDevicePlatform(),
+  crossplaySetting: 'CROSSPLAY_ENABLED',
+});
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -68,12 +112,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
   const [godModePower, setGodModePower] = useState<number>(1.0);
 
-  // Sync with Firestore profile and apply Admin elevation
+  // Sync with Firestore profile and apply Admin elevation with full offline support
   const loadOrCreateUserProfile = async (firebaseUser: FirebaseUser) => {
     const userDocRef = doc(db, 'users', firebaseUser.uid);
     const isTargetAdmin =
       firebaseUser.email?.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim();
 
+    // 1. Establish initial or cached profile immediately so UI is never blocked
+    const cached = getLocalProfile(firebaseUser.uid);
+    let activeProfile: PlayerProfile;
+
+    if (cached) {
+      activeProfile = cached;
+      if (isTargetAdmin) {
+        activeProfile.isAdmin = true;
+        activeProfile.role = 'ADMIN';
+        activeProfile.paperclips = Math.max(activeProfile.paperclips, 999999);
+        activeProfile.level = Math.max(activeProfile.level, 99);
+        activeProfile.xp = Math.max(activeProfile.xp, 999999);
+        activeProfile.unlockedPens = [...ALL_PEN_IDS];
+        activeProfile.unlockedSkins = [...ALL_SKIN_IDS];
+        activeProfile.unlockedFlickStyles = [...ALL_FLICK_STYLE_IDS];
+      }
+    } else if (isTargetAdmin) {
+      activeProfile = getAdminProfile();
+    } else {
+      activeProfile = {
+        ...DEFAULT_STARTER_PROFILE,
+        username: firebaseUser.displayName || 'DeskStriker27',
+      };
+    }
+
+    setProfile(activeProfile);
+    saveLocalProfile(firebaseUser.uid, activeProfile);
+
+    // 2. Query Firestore and synchronize cloud data when online
     try {
       const snap = await getDoc(userDocRef);
       if (snap.exists()) {
@@ -91,113 +164,117 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           totalWins: isAdmin ? Math.max(data.totalWins || 0, 777) : (data.totalWins || 0),
           totalMatches: isAdmin ? Math.max(data.totalMatches || 0, 777) : (data.totalMatches || 0),
           winStreak: isAdmin ? Math.max(data.winStreak || 0, 777) : (data.winStreak || 0),
-          equippedPenId: data.equippedPenId || 'rotring_600',
-          equippedSkinId: data.equippedSkinId || 'skin_rotring_gold',
-          equippedFlickStyleId: data.equippedFlickStyleId || 'style_knuckle_cannon',
-          unlockedPens: isAdmin ? ALL_PEN_IDS : (data.unlockedPens || ['bic_cristal', 'pilot_g2']),
-          unlockedSkins: isAdmin ? ALL_SKIN_IDS : (data.unlockedSkins || ['skin_bic_classic_blue']),
-          unlockedFlickStyles: isAdmin ? ALL_FLICK_STYLE_IDS : (data.unlockedFlickStyles || ['style_classic_thumb']),
+          equippedPenId: data.equippedPenId || (isAdmin ? 'rotring_600' : 'bic_cristal'),
+          equippedSkinId: data.equippedSkinId || (isAdmin ? 'skin_rotring_gold' : 'skin_bic_classic_blue'),
+          equippedFlickStyleId: data.equippedFlickStyleId || (isAdmin ? 'style_knuckle_cannon' : 'style_classic_thumb'),
+          unlockedPens: isAdmin ? [...ALL_PEN_IDS] : (data.unlockedPens || ['bic_cristal', 'pilot_g2']),
+          unlockedSkins: isAdmin ? [...ALL_SKIN_IDS] : (data.unlockedSkins || ['skin_bic_classic_blue']),
+          unlockedFlickStyles: isAdmin ? [...ALL_FLICK_STYLE_IDS] : (data.unlockedFlickStyles || ['style_classic_thumb']),
           role: isAdmin ? 'ADMIN' : 'PLAYER',
           isAdmin: isAdmin,
+          platform: data.platform || detectDevicePlatform(),
+          crossplaySetting: data.crossplaySetting || 'CROSSPLAY_ENABLED',
         };
 
         setProfile(loadedProfile);
+        saveLocalProfile(firebaseUser.uid, loadedProfile);
 
         // If target admin, ensure cloud doc is synchronized with admin status
-        if (isAdmin && (!data.isAdmin || data.paperclips < 999999 || (data.unlockedPens?.length || 0) < ALL_PEN_IDS.length)) {
-          await setDoc(
-            userDocRef,
-            {
-              userId: firebaseUser.uid,
-              email: firebaseUser.email || ADMIN_EMAIL,
-              username: loadedProfile.username,
-              level: loadedProfile.level,
-              xp: loadedProfile.xp,
-              xpNextLevel: loadedProfile.xpNextLevel,
-              paperclips: loadedProfile.paperclips,
-              division: loadedProfile.division,
-              divisionPoints: loadedProfile.divisionPoints,
-              totalWins: loadedProfile.totalWins,
-              totalMatches: loadedProfile.totalMatches,
-              winStreak: loadedProfile.winStreak,
-              equippedPenId: loadedProfile.equippedPenId,
-              equippedSkinId: loadedProfile.equippedSkinId,
-              equippedFlickStyleId: loadedProfile.equippedFlickStyleId,
-              unlockedPens: loadedProfile.unlockedPens,
-              unlockedSkins: loadedProfile.unlockedSkins,
-              unlockedFlickStyles: loadedProfile.unlockedFlickStyles,
-              role: 'ADMIN',
-              isAdmin: true,
-              updatedAt: serverTimestamp(),
-            },
-            { merge: true }
-          );
+        if (isAdmin && (!data.isAdmin || (data.paperclips ?? 0) < 999999 || (data.unlockedPens?.length || 0) < ALL_PEN_IDS.length)) {
+          try {
+            await setDoc(
+              userDocRef,
+              {
+                userId: firebaseUser.uid,
+                email: firebaseUser.email || ADMIN_EMAIL,
+                username: loadedProfile.username,
+                level: loadedProfile.level,
+                xp: loadedProfile.xp,
+                xpNextLevel: loadedProfile.xpNextLevel,
+                paperclips: loadedProfile.paperclips,
+                division: loadedProfile.division,
+                divisionPoints: loadedProfile.divisionPoints,
+                totalWins: loadedProfile.totalWins,
+                totalMatches: loadedProfile.totalMatches,
+                winStreak: loadedProfile.winStreak,
+                equippedPenId: loadedProfile.equippedPenId,
+                equippedSkinId: loadedProfile.equippedSkinId,
+                equippedFlickStyleId: loadedProfile.equippedFlickStyleId,
+                unlockedPens: loadedProfile.unlockedPens,
+                unlockedSkins: loadedProfile.unlockedSkins,
+                unlockedFlickStyles: loadedProfile.unlockedFlickStyles,
+                role: 'ADMIN',
+                isAdmin: true,
+                platform: loadedProfile.platform,
+                crossplaySetting: loadedProfile.crossplaySetting,
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+          } catch (syncErr) {
+            console.warn('Admin status cloud sync pending online connection:', syncErr);
+          }
         }
       } else {
         // Create initial cloud account profile
-        const isAdmin = isTargetAdmin;
-        const initialProfile: PlayerProfile = {
-          username: isAdmin ? 'Admin Developer (Sam)' : (firebaseUser.displayName || 'DeskStriker27'),
-          level: isAdmin ? 99 : 1,
-          xp: isAdmin ? 999999 : 0,
-          xpNextLevel: isAdmin ? 1000000 : 100,
-          paperclips: isAdmin ? 999999 : 240,
-          division: isAdmin ? 1 : 10,
-          divisionPoints: isAdmin ? 100 : 20,
-          totalWins: isAdmin ? 777 : 0,
-          totalMatches: isAdmin ? 777 : 0,
-          winStreak: isAdmin ? 777 : 0,
-          equippedPenId: isAdmin ? 'rotring_600' : 'bic_cristal',
-          equippedSkinId: isAdmin ? 'skin_rotring_gold' : 'skin_bic_classic_blue',
-          equippedFlickStyleId: isAdmin ? 'style_knuckle_cannon' : 'style_classic_thumb',
-          unlockedPens: isAdmin ? ALL_PEN_IDS : ['bic_cristal', 'pilot_g2'],
-          unlockedSkins: isAdmin ? ALL_SKIN_IDS : ['skin_bic_classic_blue', 'skin_g2_midnight'],
-          unlockedFlickStyles: isAdmin ? ALL_FLICK_STYLE_IDS : ['style_classic_thumb'],
-          role: isAdmin ? 'ADMIN' : 'PLAYER',
-          isAdmin: isAdmin,
+        const initialProfile: PlayerProfile = isTargetAdmin ? getAdminProfile() : {
+          ...DEFAULT_STARTER_PROFILE,
+          username: firebaseUser.displayName || 'DeskStriker27',
         };
 
-        await setDoc(userDocRef, {
-          userId: firebaseUser.uid,
-          email: firebaseUser.email || '',
-          username: initialProfile.username,
-          level: initialProfile.level,
-          xp: initialProfile.xp,
-          xpNextLevel: initialProfile.xpNextLevel,
-          paperclips: initialProfile.paperclips,
-          division: initialProfile.division,
-          divisionPoints: initialProfile.divisionPoints,
-          totalWins: initialProfile.totalWins,
-          totalMatches: initialProfile.totalMatches,
-          winStreak: initialProfile.winStreak,
-          equippedPenId: initialProfile.equippedPenId,
-          equippedSkinId: initialProfile.equippedSkinId,
-          equippedFlickStyleId: initialProfile.equippedFlickStyleId,
-          unlockedPens: initialProfile.unlockedPens,
-          unlockedSkins: initialProfile.unlockedSkins,
-          unlockedFlickStyles: initialProfile.unlockedFlickStyles,
-          role: initialProfile.role,
-          isAdmin: initialProfile.isAdmin,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-
         setProfile(initialProfile);
+        saveLocalProfile(firebaseUser.uid, initialProfile);
+
+        try {
+          await setDoc(userDocRef, {
+            userId: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            username: initialProfile.username,
+            level: initialProfile.level,
+            xp: initialProfile.xp,
+            xpNextLevel: initialProfile.xpNextLevel,
+            paperclips: initialProfile.paperclips,
+            division: initialProfile.division,
+            divisionPoints: initialProfile.divisionPoints,
+            totalWins: initialProfile.totalWins,
+            totalMatches: initialProfile.totalMatches,
+            winStreak: initialProfile.winStreak,
+            equippedPenId: initialProfile.equippedPenId,
+            equippedSkinId: initialProfile.equippedSkinId,
+            equippedFlickStyleId: initialProfile.equippedFlickStyleId,
+            unlockedPens: initialProfile.unlockedPens,
+            unlockedSkins: initialProfile.unlockedSkins,
+            unlockedFlickStyles: initialProfile.unlockedFlickStyles,
+            role: initialProfile.role,
+            isAdmin: initialProfile.isAdmin,
+            platform: initialProfile.platform,
+            crossplaySetting: initialProfile.crossplaySetting,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } catch (createErr) {
+          console.warn('Initial cloud profile creation pending online connection:', createErr);
+        }
       }
-    } catch (err) {
-      handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
+    } catch (err: any) {
+      console.warn('Firestore offline or auth token pending, continuing with local profile:', err?.message || err);
     }
   };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
-      if (currentUser) {
-        await loadOrCreateUserProfile(currentUser);
-      } else {
-        setProfile(null);
+      try {
+        if (currentUser) {
+          await loadOrCreateUserProfile(currentUser);
+        } else {
+          setProfile(null);
+        }
+      } catch (err) {
+        console.warn('Auth state subscription error handled:', err);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => unsubscribe();
@@ -230,8 +307,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!user || !profile) return;
     const newProfile = updater(profile);
     setProfile(newProfile);
+    saveLocalProfile(user.uid, newProfile);
 
-    // Sync to Firestore
+    // Sync to Firestore in background
     const userDocRef = doc(db, 'users', user.uid);
     try {
       await setDoc(
@@ -257,12 +335,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           unlockedFlickStyles: newProfile.unlockedFlickStyles,
           role: newProfile.role || 'PLAYER',
           isAdmin: Boolean(newProfile.isAdmin),
+          platform: newProfile.platform,
+          crossplaySetting: newProfile.crossplaySetting,
           updatedAt: serverTimestamp(),
         },
         { merge: true }
       );
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
+    } catch (err: any) {
+      console.warn('Profile cloud sync pending online reconnect:', err?.message || err);
     }
   };
 

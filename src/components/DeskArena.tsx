@@ -4,16 +4,19 @@
  */
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { PenEntity, DeskObstacle, PlayerProfile, FlickStyle, PenDefinition } from '../types/game';
-import { PENS_CATALOG, FLICK_STYLES } from '../data/initialData';
+import { PenEntity, DeskObstacle, PlayerProfile, FlickStyle, PenDefinition, BotDifficulty, MatchMode } from '../types/game';
+import { PENS_CATALOG, FLICK_STYLES, BOT_DIFFICULTIES } from '../data/initialData';
 import { stepPhysics, DeskBounds, distance, normalize } from '../physics/penPhysics';
 import { sounds } from '../utils/audio';
+import { triggerHaptic, detectDevicePlatform } from '../utils/device';
 import { PenChangeModal } from './PenChangeModal';
-import { RotateCcw, Zap, Compass, ShieldAlert, Award, Camera, Scale, RefreshCw } from 'lucide-react';
+import { RotateCcw, Zap, Compass, ShieldAlert, Award, Camera, Scale, RefreshCw, Smartphone, Laptop, SlidersHorizontal, Bot } from 'lucide-react';
 
 interface DeskArenaProps {
-  mode: 'RANKED' | 'TOURNAMENT' | 'PASS_PLAY' | 'ONLINE_ROOM';
+  mode: MatchMode;
   playerProfile: PlayerProfile;
+  botDifficulty?: BotDifficulty;
+  botPenId?: string;
   opponentName?: string;
   opponentAvatar?: string;
   onMatchComplete: (winner: 'player1' | 'player2') => void;
@@ -22,6 +25,9 @@ interface DeskArenaProps {
   onSendFlick?: (power: number, angle: number, curve: number, styleId: string) => void;
   incomingOnlineFlick?: { power: number; angle: number; curve: number; styleId: string } | null;
   godModePower?: number;
+  playerPlatform?: 'mobile' | 'desktop';
+  opponentPlatform?: 'mobile' | 'desktop';
+  crossplay?: boolean;
 }
 
 const DESK_WIDTH = 840;
@@ -36,6 +42,8 @@ const TABLE_BOUNDS: DeskBounds = {
 export const DeskArena: React.FC<DeskArenaProps> = ({
   mode,
   playerProfile,
+  botDifficulty = 'NORMAL',
+  botPenId,
   opponentName = 'RivalStriker_X',
   opponentAvatar = '🎯',
   onMatchComplete,
@@ -44,6 +52,9 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
   onSendFlick,
   incomingOnlineFlick,
   godModePower = 1.0,
+  playerPlatform = detectDevicePlatform(),
+  opponentPlatform = 'desktop',
+  crossplay = true,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -55,6 +66,12 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
   const [matchWinner, setMatchWinner] = useState<'player1' | 'player2' | null>(null);
   const [knockoutBanner, setKnockoutBanner] = useState<string | null>(null);
   const [slowMoReplay, setSlowMoReplay] = useState<boolean>(false);
+
+  // Mobile ergonomics & Pass & Play state
+  const isMobileDevice = playerPlatform === 'mobile';
+  const [useVirtualFlickPad, setUseVirtualFlickPad] = useState<boolean>(isMobileDevice);
+  const [passPlayNotice, setPassPlayNotice] = useState<string | null>(null);
+  const lastPowerBracketRef = useRef<number>(-1);
 
   // Pen change modal
   const [showPenChangeModal, setShowPenChangeModal] = useState<boolean>(false);
@@ -116,8 +133,13 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
       userPenDef.availableSkins.find((s) => s.id === playerProfile.equippedSkinId) ||
       userPenDef.availableSkins[0];
 
-    // Pick opponent pen based on mode (e.g. Parker Jotter or Rotring 600)
-    const oppPenDef = PENS_CATALOG[4] || PENS_CATALOG[1];
+    // Pick opponent pen: if in Bot Lab, use the chosen bot pen; otherwise use standard rival pen
+    const oppPenDef =
+      (mode === 'BOT_BATTLE' && botPenId
+        ? PENS_CATALOG.find((p) => p.id === botPenId)
+        : null) ||
+      PENS_CATALOG[4] ||
+      PENS_CATALOG[1];
     const oppSkin = oppPenDef.availableSkins[0];
 
     pensRef.current = [
@@ -144,8 +166,8 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
       },
       {
         id: 'pen_player2',
-        owner: mode === 'PASS_PLAY' ? 'player2' : 'ai',
-        name: oppPenDef.name,
+        owner: mode === 'BOT_BATTLE' ? 'ai' : 'player2',
+        name: mode === 'BOT_BATTLE' ? `[AI BOT] ${opponentName}` : oppPenDef.name,
         brand: oppPenDef.brand,
         penId: oppPenDef.id,
         skinId: oppSkin.id,
@@ -167,7 +189,7 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
 
     setIsSimulating(false);
     setKnockoutBanner(null);
-  }, [playerProfile, mode]);
+  }, [playerProfile, mode, botPenId, opponentName]);
 
   // Load desk background texture once
   useEffect(() => {
@@ -207,6 +229,7 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
       pen.angularVel = baseTorque / Math.max(0.6, pen.stats.mass * 0.8);
 
       sounds.playFlick(powerNormalized);
+      triggerHaptic('medium');
       setIsSimulating(true);
     },
     [godModePower]
@@ -227,35 +250,145 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
     }
   }, [incomingOnlineFlick, mode, executeFlick]);
 
-  // AI Opponent move calculation
+  // AI Opponent move calculation - Strictly active ONLY in BOT_BATTLE mode
   const triggerAiFlick = useCallback(() => {
+    // Safety check: Never run AI in Ranked, Pass & Play, or Online Room modes!
+    if (mode !== 'BOT_BATTLE') return;
+
     const aiPen = pensRef.current.find((p) => p.id === 'pen_player2');
     const playerPen = pensRef.current.find((p) => p.id === 'pen_player1');
     if (!aiPen || !playerPen || aiPen.isKnockedOut || playerPen.isKnockedOut) return;
 
+    const diffConfig =
+      BOT_DIFFICULTIES.find((d) => d.id === botDifficulty) || BOT_DIFFICULTIES[2];
+
     const dx = playerPen.pos.x - aiPen.pos.x;
     const dy = playerPen.pos.y - aiPen.pos.y;
-    let targetAngle = Math.atan2(dy, dx);
-
-    targetAngle += (Math.random() - 0.5) * 0.12;
-
     const dist = Math.hypot(dx, dy);
-    // Adjusted power scaling for real pen weight
-    let power = Math.min(1.0, Math.max(0.4, (dist / 400) * (aiPen.stats.mass / 1.1)));
+    const baseAngle = Math.atan2(dy, dx);
 
-    const nearEdge =
-      playerPen.pos.x < TABLE_BOUNDS.x + 80 ||
-      playerPen.pos.x > TABLE_BOUNDS.x + TABLE_BOUNDS.width - 80 ||
-      playerPen.pos.y < TABLE_BOUNDS.y + 80 ||
-      playerPen.pos.y > TABLE_BOUNDS.y + TABLE_BOUNDS.height - 80;
+    // Calculate distance to table boundaries
+    const playerDistLeft = playerPen.pos.x - TABLE_BOUNDS.x;
+    const playerDistRight = TABLE_BOUNDS.x + TABLE_BOUNDS.width - playerPen.pos.x;
+    const playerDistTop = playerPen.pos.y - TABLE_BOUNDS.y;
+    const playerDistBottom = TABLE_BOUNDS.y + TABLE_BOUNDS.height - playerPen.pos.y;
+    const minPlayerRim = Math.min(playerDistLeft, playerDistRight, playerDistTop, playerDistBottom);
 
-    if (nearEdge) power = Math.min(1.0, power * 1.2);
+    const aiDistLeft = aiPen.pos.x - TABLE_BOUNDS.x;
+    const aiDistRight = TABLE_BOUNDS.x + TABLE_BOUNDS.width - aiPen.pos.x;
+    const aiDistTop = aiPen.pos.y - TABLE_BOUNDS.y;
+    const aiDistBottom = TABLE_BOUNDS.y + TABLE_BOUNDS.height - aiPen.pos.y;
+    const minAiRim = Math.min(aiDistLeft, aiDistRight, aiDistTop, aiDistBottom);
 
-    const aiCurve = (Math.random() - 0.5) * 0.3;
-    const aiStyle = FLICK_STYLES[0];
+    let targetAngle = baseAngle;
+    let power = 0.5;
+    let curve = 0;
+    let chosenStyle = FLICK_STYLES[0];
 
-    executeFlick('pen_player2', power, targetAngle, aiCurve, aiStyle);
-  }, [executeFlick]);
+    switch (diffConfig.id) {
+      case 'DUMMY': {
+        // Stupider AI: Wild erratic aim, pathetic underpower or suicidal full-power flings
+        const aimError = (Math.random() - 0.5) * 1.3; // ±75° wobble
+        targetAngle = baseAngle + aimError;
+
+        const behaviorRoll = Math.random();
+        if (behaviorRoll < 0.45) {
+          // Underpower misfire (pen barely creeps forward 3cm)
+          power = 0.12 + Math.random() * 0.14;
+        } else if (behaviorRoll < 0.8) {
+          // Suicide fling: overpowered impulse directly toward the nearest rim
+          power = 0.96 + Math.random() * 0.04;
+          if (Math.random() < 0.5) {
+            // Aim straight at edge instead of player!
+            targetAngle += (Math.random() - 0.5) * 1.5;
+          }
+        } else {
+          // Semi-random shot
+          power = 0.45 + (Math.random() - 0.5) * 0.3;
+        }
+        curve = (Math.random() - 0.5) * 0.5;
+        break;
+      }
+
+      case 'ROOKIE': {
+        // Rookie AI: Shaky aim, misjudged friction, no rim safety
+        targetAngle = baseAngle + (Math.random() - 0.5) * 0.48; // ±27° wobble
+        power = Math.min(
+          1.0,
+          Math.max(0.25, (dist / 380) * (aiPen.stats.mass / 1.1) + (Math.random() - 0.5) * 0.38)
+        );
+        curve = (Math.random() - 0.5) * 0.25;
+        break;
+      }
+
+      case 'NORMAL': {
+        // Balanced AI: Decent fundamentals, consistent power, minor variance
+        targetAngle = baseAngle + (Math.random() - 0.5) * 0.14; // ±8°
+        power = Math.min(1.0, Math.max(0.35, (dist / 400) * (aiPen.stats.mass / 1.1)));
+        if (minPlayerRim < 85) {
+          power = Math.min(1.0, power * 1.25);
+        }
+        curve = (Math.random() - 0.5) * 0.1;
+        break;
+      }
+
+      case 'HARD': {
+        // Smarter AI: Pushes player toward nearest rim, checks self-preservation
+        let rimDx = 0;
+        let rimDy = 0;
+        if (minPlayerRim === playerDistLeft) rimDx = -1;
+        else if (minPlayerRim === playerDistRight) rimDx = 1;
+        else if (minPlayerRim === playerDistTop) rimDy = -1;
+        else rimDy = 1;
+
+        const rimAngle = Math.atan2(rimDy, rimDx);
+        const bias = Math.sin(rimAngle - baseAngle) * 0.12;
+        targetAngle = baseAngle + bias + (Math.random() - 0.5) * 0.035;
+
+        const massRatio = playerPen.stats.mass / aiPen.stats.mass;
+        power = Math.min(1.0, Math.max(0.42, (dist / 360) * Math.sqrt(massRatio) * 1.18));
+
+        // Self-preservation: if bot is close to edge, prevent self-knockout
+        if (minAiRim < 85) {
+          power = Math.min(0.68, power);
+        }
+        chosenStyle = FLICK_STYLES[1] || FLICK_STYLES[0];
+        curve = (Math.random() - 0.5) * 0.15;
+        break;
+      }
+
+      case 'CYBORG_APEX': {
+        // Mastermind AI: Exact physics prediction, spin induction, zero suicide
+        const playerHalfL = playerPen.stats.length / 2;
+        // Hit off-center (tip or cap) to induce high rotational spin and destabilize player
+        const cornerOffset = playerHalfL * 0.35;
+        const contactX = playerPen.pos.x + Math.cos(playerPen.angle) * cornerOffset;
+        const contactY = playerPen.pos.y + Math.sin(playerPen.angle) * cornerOffset;
+
+        targetAngle = Math.atan2(contactY - aiPen.pos.y, contactX - aiPen.pos.x);
+
+        // Required impulse to push player past rim
+        const neededSpeed = Math.sqrt(2 * playerPen.stats.friction * 980 * (minPlayerRim + 45));
+        const impulse = (neededSpeed * playerPen.stats.mass) / playerPen.stats.powerMultiplier;
+        const calculatedPower = (impulse * aiPen.stats.mass) / (18.0 * 1.25);
+        power = Math.min(1.0, Math.max(0.46, calculatedPower));
+
+        // Strict boundary check: Ensure bot does not slide off after impact
+        const maxSafeTravel = Math.max(15, minAiRim - 25);
+        const maxSafeSpeed = Math.sqrt(2 * aiPen.stats.friction * 980 * maxSafeTravel);
+        const maxSafePower = (maxSafeSpeed * aiPen.stats.mass) / 18.0;
+        if (power > maxSafePower && maxSafePower > 0.38) {
+          power = maxSafePower;
+        }
+
+        chosenStyle = FLICK_STYLES[2] || FLICK_STYLES[0];
+        curve = minPlayerRim < 120 ? -0.08 : 0.08;
+        break;
+      }
+    }
+
+    executeFlick('pen_player2', power, targetAngle, curve, chosenStyle);
+  }, [executeFlick, mode, botDifficulty]);
 
   // Render authentic silhouettes for real pen brands
   const drawRealPenSilhouette = (ctx: CanvasRenderingContext2D, pen: PenEntity) => {
@@ -430,6 +563,7 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
 
         for (const col of result.collisions) {
           sounds.playDeskImpact(col.intensity, col.material);
+          triggerHaptic(col.intensity > 0.5 ? 'heavy' : 'light');
         }
 
         const p1 = pensRef.current.find((p) => p.id === 'pen_player1');
@@ -441,6 +575,7 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
         if (p1Out || p2Out) {
           if (!knockoutBanner) {
             sounds.playKnockout();
+            triggerHaptic('knockout');
             if (p1Out && p2Out) {
               setKnockoutBanner('DOUBLE RING OUT! REPLAY ROUND');
             } else if (p2Out) {
@@ -487,7 +622,11 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
           } else {
             setActiveTurn((prev) => {
               const nextTurn = prev === 'player1' ? 'player2' : 'player1';
-              if (nextTurn === 'player2' && mode !== 'PASS_PLAY' && mode !== 'ONLINE_ROOM') {
+              if (mode === 'PASS_PLAY') {
+                setPassPlayNotice(nextTurn === 'player1' ? playerProfile.username : (opponentName || 'Player 2'));
+                triggerHaptic('heavy');
+              }
+              if (nextTurn === 'player2' && mode === 'BOT_BATTLE') {
                 setTimeout(() => {
                   triggerAiFlick();
                 }, 800);
@@ -702,6 +841,10 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
     const currentPen = pensRef.current.find((p) => p.owner === activeTurn);
     if (!currentPen) return;
 
+    // Trigger initial tactile touch haptic
+    triggerHaptic('light');
+    lastPowerBracketRef.current = 0;
+
     setAimState({
       isAiming: true,
       startPos: { x: clickX, y: clickY },
@@ -725,13 +868,24 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
     const currentPen = pensRef.current.find((p) => p.owner === activeTurn);
     if (!currentPen) return;
 
-    const dx = currentX - currentPen.pos.x;
-    const dy = currentY - currentPen.pos.y;
+    // Use relative drag if thumb flick pad is active or user started dragging far from pen
+    const distToPen = distance(aimState.startPos, currentPen.pos);
+    const isRelativeDrag = useVirtualFlickPad || distToPen > 110;
+
+    const dx = isRelativeDrag ? currentX - aimState.startPos.x : currentX - currentPen.pos.x;
+    const dy = isRelativeDrag ? currentY - aimState.startPos.y : currentY - currentPen.pos.y;
     const pullDist = Math.hypot(dx, dy);
 
     const maxPull = 140;
-    const powerNormalized = Math.min(1.0, Math.max(0.1, pullDist / maxPull));
+    const powerNormalized = Math.min(1.0, Math.max(0.08, pullDist / maxPull));
     const flickAngle = Math.atan2(-dy, -dx);
+
+    // Tactile haptic click whenever crossing power brackets (25%, 50%, 75%, 100%)
+    const bracket = Math.floor(powerNormalized * 4);
+    if (bracket !== lastPowerBracketRef.current) {
+      lastPowerBracketRef.current = bracket;
+      triggerHaptic('powerTick');
+    }
 
     setAimState((prev) => ({
       ...prev,
@@ -773,14 +927,147 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
     });
   };
 
+  // PC Mouse wheel to adjust curve/spin on the fly
+  const handleCanvasWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    setCurveModifier((prev) => {
+      const next = e.deltaY < 0 ? Math.min(1.0, +(prev + 0.1).toFixed(1)) : Math.max(-1.0, +(prev - 0.1).toFixed(1));
+      triggerHaptic('spin');
+      return next;
+    });
+  };
+
+  // PC Keyboard Shortcuts (1-6 for styles, Q/E for spin, Space for flick, R for rematch)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (showPenChangeModal) return;
+
+      if (e.key >= '1' && e.key <= '6') {
+        const idx = parseInt(e.key) - 1;
+        if (FLICK_STYLES[idx] && playerProfile.unlockedFlickStyles.includes(FLICK_STYLES[idx].id)) {
+          setSelectedFlickStyle(FLICK_STYLES[idx]);
+          sounds.playClick();
+        }
+      } else if (e.key === 'q' || e.key === 'Q' || e.key === 'ArrowLeft') {
+        setCurveModifier((c) => {
+          const next = Math.max(-1.0, +(c - 0.1).toFixed(1));
+          triggerHaptic('spin');
+          return next;
+        });
+      } else if (e.key === 'e' || e.key === 'E' || e.key === 'ArrowRight') {
+        setCurveModifier((c) => {
+          const next = Math.min(1.0, +(c + 0.1).toFixed(1));
+          triggerHaptic('spin');
+          return next;
+        });
+      } else if (e.key === 'w' || e.key === 'W' || e.key === '0') {
+        setCurveModifier(0);
+        triggerHaptic('spin');
+      } else if (e.key === 'r' || e.key === 'R') {
+        if (matchWinner) {
+          sounds.playClick();
+          setMatchWinner(null);
+          setRoundScore([0, 0]);
+          setCurrentRound(1);
+          resetRoundPositions();
+        }
+      } else if (e.key === ' ' && !isSimulating && !matchWinner) {
+        if (mode === 'RANKED' && activeTurn !== 'player1') return;
+        if (mode === 'ONLINE_ROOM' && activeTurn !== 'player1') return;
+        const currentPen = pensRef.current.find((p) => p.owner === activeTurn);
+        if (currentPen) {
+          const power = aimState.isAiming && aimState.powerNormalized > 0.1 ? aimState.powerNormalized : 0.75;
+          const angle = aimState.isAiming ? aimState.angle : currentPen.angle;
+          executeFlick(currentPen.id, power, angle, curveModifier, selectedFlickStyle);
+          if (mode === 'ONLINE_ROOM' && onSendFlick) {
+            onSendFlick(power, angle, curveModifier, selectedFlickStyle.id);
+          }
+          setAimState({
+            isAiming: false,
+            startPos: { x: 0, y: 0 },
+            currentPos: { x: 0, y: 0 },
+            powerNormalized: 0,
+            angle: 0,
+          });
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    showPenChangeModal,
+    matchWinner,
+    isSimulating,
+    activeTurn,
+    curveModifier,
+    selectedFlickStyle,
+    playerProfile.unlockedFlickStyles,
+    resetRoundPositions,
+    executeFlick,
+    aimState,
+    mode,
+    onSendFlick,
+  ]);
+
   const p1Pen = pensRef.current.find((p) => p.id === 'pen_player1');
   const p2Pen = pensRef.current.find((p) => p.id === 'pen_player2');
 
   return (
-    <div className="flex flex-col items-center w-full max-w-5xl mx-auto px-4 py-3">
-      {/* Brutalist Broadcast Scoreboard Header */}
-      <div className="w-full flex items-center justify-between bg-[#0e121b] border-4 border-white px-6 py-3.5 mb-4 shadow-brutal-yellow">
-        {/* Player 1 Card with Real Pen Brand & Grams */}
+    <div className="flex flex-col items-center w-full max-w-5xl mx-auto px-2 sm:px-4 py-2 sm:py-3 touch-none select-none">
+      {/* Mobile Compact Broadcast Scorebug (< 640px) */}
+      <div className="sm:hidden w-full bg-[#0e121b] border-2 border-white p-2 mb-2 shadow-brutal-yellow">
+        <div className="flex items-center justify-between gap-1.5">
+          {/* Player 1 Mini */}
+          <div className={`flex items-center gap-1.5 px-2 py-1 border transition-all ${
+            activeTurn === 'player1' ? 'bg-[#ffe500]/20 border-[#ffe500] shadow-sm' : 'border-white/10'
+          }`}>
+            <span className="text-sm">{playerPlatform === 'mobile' ? '📱' : '🖥️'}</span>
+            <div className="flex flex-col leading-none">
+              <span className="font-broadcast text-xs font-black uppercase text-white truncate max-w-[85px]">
+                {playerProfile.username}
+              </span>
+              <span className="font-mono text-[9px] text-[#ffe500] font-bold mt-0.5">
+                {p1Pen?.stats.weightGrams}g
+              </span>
+            </div>
+          </div>
+
+          {/* Center Broadcast Score */}
+          <div className="flex flex-col items-center">
+            <div className="flex items-center gap-1.5 px-2.5 py-0.5 bg-black border border-white font-mono text-xl font-black text-white tabular-nums">
+              <span className={roundScore[0] > roundScore[1] ? 'text-[#ffe500]' : 'text-slate-200'}>
+                {roundScore[0]}
+              </span>
+              <span className="text-slate-500 text-sm">:</span>
+              <span className={roundScore[1] > roundScore[0] ? 'text-red-400' : 'text-slate-200'}>
+                {roundScore[1]}
+              </span>
+            </div>
+            <span className="text-[8px] uppercase font-mono font-bold tracking-widest text-slate-400 mt-0.5">
+              RND {currentRound}/3
+            </span>
+          </div>
+
+          {/* Player 2 Mini */}
+          <div className={`flex items-center gap-1.5 px-2 py-1 border text-right transition-all ${
+            activeTurn === 'player2' ? 'bg-red-500/20 border-red-500 shadow-sm' : 'border-white/10'
+          }`}>
+            <div className="flex flex-col items-end leading-none">
+              <span className="font-broadcast text-xs font-black uppercase text-white truncate max-w-[85px]">
+                {opponentName}
+              </span>
+              <span className="font-mono text-[9px] text-red-300 font-bold mt-0.5">
+                {p2Pen?.stats.weightGrams}g
+              </span>
+            </div>
+            <span className="text-sm">{opponentPlatform === 'mobile' ? '📱' : '🖥️'}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Desktop Broadcast Scoreboard Header (>= 640px) */}
+      <div className="hidden sm:flex w-full items-center justify-between bg-[#0e121b] border-4 border-white px-6 py-3 mb-3 shadow-brutal-yellow">
+        {/* Player 1 Card */}
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 bg-[#ffe500] border-2 border-black flex items-center justify-center text-xl shadow-brutal-black">
             🖋️
@@ -792,6 +1079,9 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
               </span>
               <span className="text-[10px] font-mono font-black uppercase text-black bg-[#ffe500] px-1.5 py-0.2 border border-black">
                 DIV {playerProfile.division}
+              </span>
+              <span className="text-xs px-1.5 py-0.5 bg-black border border-white/30 text-slate-300 font-mono" title={`Platform: ${playerPlatform}`}>
+                {playerPlatform === 'mobile' ? '📱 Mobile' : '🖥️ PC'}
               </span>
             </div>
             <div className="text-xs font-mono font-bold flex items-center gap-1.5 mt-0.5">
@@ -808,7 +1098,7 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
 
         {/* Center Match Score (Best of 3) */}
         <div className="flex flex-col items-center">
-          <div className="flex items-center gap-3 px-5 py-1.5 bg-black border-2 border-white font-mono text-3xl font-black text-white shadow-brutal-black tabular-nums">
+          <div className="flex items-center gap-3 px-5 py-1 bg-black border-2 border-white font-mono text-3xl font-black text-white shadow-brutal-black tabular-nums">
             <span className={roundScore[0] > roundScore[1] ? 'text-[#ffe500]' : 'text-slate-200'}>
               {roundScore[0]}
             </span>
@@ -831,6 +1121,15 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
         <div className="flex items-center gap-3">
           <div className="text-right">
             <div className="flex items-center justify-end gap-2">
+              {mode === 'BOT_BATTLE' ? (
+                <span className="text-[10px] font-mono font-black uppercase text-black bg-[#ffe500] px-1.5 py-0.2 border border-black">
+                  AI BOT // {botDifficulty}
+                </span>
+              ) : (
+                <span className="text-xs px-1.5 py-0.5 bg-black border border-white/30 text-slate-300 font-mono" title={`Platform: ${opponentPlatform}`}>
+                  {opponentPlatform === 'mobile' ? '📱 Mobile' : '🖥️ PC'}
+                </span>
+              )}
               <span className="font-broadcast text-xl font-black italic uppercase text-white tracking-wide">
                 {opponentName}
               </span>
@@ -846,52 +1145,97 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
             </div>
           </div>
           <div className="w-11 h-11 bg-red-600 border-2 border-black flex items-center justify-center text-xl shadow-brutal-black">
-            🎯
+            {mode === 'BOT_BATTLE' ? '🤖' : '🎯'}
           </div>
         </div>
       </div>
 
       {/* Main Canvas Arena Container */}
-      <div className="relative w-full aspect-[840/520] bg-black border-4 border-white shadow-brutal-white overflow-hidden">
+      <div className="relative w-full aspect-[840/520] bg-black border-3 sm:border-4 border-white shadow-brutal-white overflow-hidden touch-none select-none">
         <canvas
           ref={canvasRef}
           width={DESK_WIDTH}
           height={DESK_HEIGHT}
-          className="w-full h-full cursor-crosshair touch-none"
+          className="w-full h-full cursor-crosshair touch-none select-none"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
+          onWheel={handleCanvasWheel}
         />
 
         {/* Slow-mo Replay & Knockout Banner Overlay */}
         {knockoutBanner && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 backdrop-blur-xs pointer-events-none animate-fadeIn">
-            <div className="bg-[#ffe500] text-black border-4 border-black px-8 py-3 shadow-brutal-black -rotate-2 flex flex-col items-center">
-              <div className="flex items-center gap-2 font-mono text-xs font-black uppercase tracking-widest mb-0.5">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/75 backdrop-blur-xs pointer-events-none animate-fadeIn z-30">
+            <div className="bg-[#ffe500] text-black border-4 border-black px-6 sm:px-8 py-3 shadow-brutal-black -rotate-2 flex flex-col items-center max-w-[90%] text-center">
+              <div className="flex items-center gap-2 font-mono text-[10px] sm:text-xs font-black uppercase tracking-widest mb-0.5">
                 <Camera className="w-4 h-4" /> REPLAY FLASH // OUT OF BOUNDS
               </div>
-              <h2 className="font-broadcast text-3xl sm:text-5xl font-black italic tracking-wider uppercase text-black">
+              <h2 className="font-broadcast text-2xl sm:text-5xl font-black italic tracking-wider uppercase text-black">
                 {knockoutBanner}
               </h2>
             </div>
-            <p className="text-white font-mono text-xs uppercase tracking-widest mt-4 bg-black px-3 py-1 border border-white">
+            <p className="text-white font-mono text-[10px] sm:text-xs uppercase tracking-widest mt-4 bg-black px-3 py-1 border border-white">
               DESK PERIMETER KNOCKOUT · POINT AWARDED
             </p>
           </div>
         )}
 
+        {/* Pass & Play Device Handover Modal */}
+        {passPlayNotice && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md p-6 z-40">
+            <div className="bg-[#0e121b] border-4 border-[#ffe500] p-6 max-w-sm w-full text-center shadow-brutal-yellow">
+              <div className="w-14 h-14 bg-[#ffe500] text-black border-2 border-black mx-auto flex items-center justify-center mb-3 shadow-brutal-black text-2xl">
+                📱
+              </div>
+              <span className="text-xs uppercase font-mono font-bold tracking-widest text-[#ffe500] mb-1 block">
+                PASS & PLAY TURN HANDOVER
+              </span>
+              <h3 className="font-broadcast text-3xl font-black italic uppercase text-white mb-2">
+                PASS TO {passPlayNotice}!
+              </h3>
+              <p className="text-slate-300 text-xs mb-5">
+                Hand device over to the rival fighter. Tap ready when poised to aim and strike.
+              </p>
+              <button
+                onClick={() => {
+                  triggerHaptic('medium');
+                  sounds.playClick();
+                  setPassPlayNotice(null);
+                }}
+                className="w-full py-3 bg-[#ffe500] hover:bg-[#ebd300] text-black font-broadcast font-black text-lg uppercase tracking-wider border-2 border-black shadow-brutal-white cursor-pointer active:scale-95 transition-transform"
+              >
+                I AM READY TO FLICK
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Virtual Thumb Flick Pad for Mobile Ergonomics */}
+        {useVirtualFlickPad && !isSimulating && !matchWinner && activeTurn === 'player1' && (
+          <div className="absolute bottom-2 right-2 sm:bottom-4 sm:right-4 z-20 pointer-events-none">
+            <div className="border-2 border-dashed border-[#ffe500]/50 bg-black/40 backdrop-blur-xs px-3 py-2 flex flex-col items-center">
+              <span className="text-[9px] font-mono font-black text-[#ffe500] uppercase tracking-wider">
+                THUMB FLICK ZONE
+              </span>
+              <span className="text-[8px] font-mono text-slate-300">
+                PULL BACK HERE TO AIM
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Match Finished Victory Modal */}
         {matchWinner && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md p-6 z-20">
-            <div className="bg-[#0e121b] border-4 border-[#ffe500] p-8 max-w-md w-full text-center shadow-brutal-yellow">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md p-4 sm:p-6 z-40">
+            <div className="bg-[#0e121b] border-4 border-[#ffe500] p-6 sm:p-8 max-w-md w-full text-center shadow-brutal-yellow">
               <div className="w-16 h-16 bg-[#ffe500] text-black border-2 border-black mx-auto flex items-center justify-center mb-3 shadow-brutal-black">
                 <Award className="w-8 h-8" />
               </div>
               <span className="text-xs uppercase font-mono font-bold tracking-widest text-[#ffe500] mb-1 block">
                 MATCH SETTLED // BOUT COMPLETED
               </span>
-              <h3 className="font-broadcast text-4xl sm:text-5xl font-black italic uppercase text-white mb-2">
+              <h3 className="font-broadcast text-3xl sm:text-5xl font-black italic uppercase text-white mb-2">
                 {matchWinner === 'player1' ? `${playerProfile.username} WINS!` : `${opponentName} WINS!`}
               </h3>
               <p className="text-slate-300 text-xs sm:text-sm mb-6">
@@ -899,7 +1243,7 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
                   ? '+30 Paperclips secured! Progression XP saved to cloud profile.'
                   : 'Fell off the wood rim. Calibrate your flick angle for the rematch!'}
               </p>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-col sm:flex-row items-center gap-3">
                 <button
                   onClick={() => {
                     sounds.playClick();
@@ -908,16 +1252,16 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
                     setCurrentRound(1);
                     resetRoundPositions();
                   }}
-                  className="flex-1 py-3 bg-[#ffe500] hover:bg-[#ebd300] text-black font-broadcast font-black text-sm uppercase tracking-wider border-2 border-black shadow-brutal-white cursor-pointer"
+                  className="w-full py-3 bg-[#ffe500] hover:bg-[#ebd300] text-black font-broadcast font-black text-sm uppercase tracking-wider border-2 border-black shadow-brutal-white cursor-pointer active:scale-95"
                 >
-                  Instant Rematch
+                  Instant Rematch (Press R)
                 </button>
                 <button
                   onClick={() => {
                     sounds.playClick();
                     onExitMatch();
                   }}
-                  className="flex-1 py-3 bg-white/10 hover:bg-white/20 text-white font-broadcast font-bold text-sm uppercase tracking-wider border-2 border-white/30 cursor-pointer"
+                  className="w-full py-3 bg-white/10 hover:bg-white/20 text-white font-broadcast font-bold text-sm uppercase tracking-wider border-2 border-white/30 cursor-pointer active:scale-95"
                 >
                   Return to Hub
                 </button>
@@ -927,26 +1271,62 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
         )}
       </div>
 
-      {/* Interactive Controls Bar: Flick Style Selector & Quick Change Pen Menu Button */}
-      <div className="w-full flex flex-wrap items-center justify-between gap-4 mt-4 bg-[#0e121b] border-2 border-white/20 p-4 shadow-brutal-black">
-        {/* Quick Pen Changer Button */}
-        <button
-          onClick={() => {
-            sounds.playClick();
-            setShowPenChangeModal(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2.5 bg-[#ffe500] hover:bg-[#ebd300] text-black font-broadcast font-black text-sm uppercase tracking-wider border-2 border-black shadow-brutal-white transition-transform hover:-translate-y-0.5 cursor-pointer whitespace-nowrap shrink-0"
-        >
-          <Scale className="w-4 h-4" />
-          <span>Change Weapon ({p1Pen?.stats.weightGrams}g)</span>
-        </button>
+      {/* PC Keyboard Shortcuts HUD Bar (Desktop only) */}
+      <div className="hidden lg:flex items-center justify-between w-full px-3 py-1.5 mt-2 bg-black/60 border border-white/10 text-[10px] font-mono text-slate-400">
+        <div className="flex items-center gap-4">
+          <span><strong className="text-white bg-white/10 px-1 border border-white/20">1-6</strong> Technique Styles</span>
+          <span><strong className="text-white bg-white/10 px-1 border border-white/20">Q / E</strong> Curve Left/Right</span>
+          <span><strong className="text-white bg-white/10 px-1 border border-white/20">Scroll Wheel</strong> Spin</span>
+          <span><strong className="text-white bg-white/10 px-1 border border-white/20">Space</strong> Flick</span>
+          <span><strong className="text-white bg-white/10 px-1 border border-white/20">R</strong> Rematch</span>
+        </div>
+        <div className="flex items-center gap-2 text-[#ffe500]">
+          <span>CROSSPLAY: {crossplay ? 'ENABLED' : 'SOLO'}</span>
+        </div>
+      </div>
 
-        {/* Flick Style Picker */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
-          <span className="text-xs font-mono font-bold uppercase text-slate-400 whitespace-nowrap shrink-0 mr-1">
-            TECHNIQUE:
+      {/* Interactive Controls Bar */}
+      <div className="w-full flex flex-col md:flex-row items-center justify-between gap-3 mt-3 bg-[#0e121b] border-2 border-white/20 p-3 sm:p-4 shadow-brutal-black">
+        {/* Row 1 on mobile: Weapon Button & Pad Toggle */}
+        <div className="flex items-center justify-between w-full md:w-auto gap-2">
+          {/* Quick Pen Changer Button */}
+          <button
+            onClick={() => {
+              sounds.playClick();
+              setShowPenChangeModal(true);
+            }}
+            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 bg-[#ffe500] hover:bg-[#ebd300] text-black font-broadcast font-black text-xs sm:text-sm uppercase tracking-wider border-2 border-black shadow-brutal-white active:scale-95 cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <Scale className="w-4 h-4" />
+            <span>Weapon ({p1Pen?.stats.weightGrams}g)</span>
+          </button>
+
+          {/* Virtual Thumb Pad Toggle */}
+          <button
+            onClick={() => {
+              triggerHaptic('light');
+              sounds.playClick();
+              setUseVirtualFlickPad((p) => !p);
+            }}
+            className={`flex items-center gap-1.5 px-3 py-2.5 border-2 text-xs font-mono font-bold tracking-tight cursor-pointer active:scale-95 transition-all ${
+              useVirtualFlickPad
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500'
+                : 'bg-black text-slate-400 border-white/20 hover:text-white'
+            }`}
+            title="Toggle spacious thumb flick pad on desk"
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Thumb Pad:</span>
+            <span>{useVirtualFlickPad ? 'ON' : 'OFF'}</span>
+          </button>
+        </div>
+
+        {/* Technique Styles Picker */}
+        <div className="w-full md:w-auto flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-thin">
+          <span className="hidden xl:inline text-xs font-mono font-bold uppercase text-slate-400 mr-1 whitespace-nowrap">
+            STYLE:
           </span>
-          {FLICK_STYLES.map((style) => {
+          {FLICK_STYLES.map((style, idx) => {
             const isUnlocked = playerProfile.unlockedFlickStyles.includes(style.id);
             const isSelected = selectedFlickStyle.id === style.id;
 
@@ -955,10 +1335,11 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
                 key={style.id}
                 disabled={!isUnlocked}
                 onClick={() => {
+                  triggerHaptic('light');
                   sounds.playClick();
                   setSelectedFlickStyle(style);
                 }}
-                className={`px-3 py-1.5 text-xs font-broadcast font-bold uppercase rounded-none border-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                className={`px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs font-broadcast font-bold uppercase border-2 transition-all whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer active:scale-95 ${
                   !isUnlocked
                     ? 'opacity-35 bg-white/5 border-transparent text-slate-500 cursor-not-allowed'
                     : isSelected
@@ -971,6 +1352,9 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
                     : `Unlocks at Player Level ${style.levelRequired}`
                 }
               >
+                <span className="hidden sm:inline text-[9px] font-mono font-black text-slate-400 bg-white/10 px-1 border border-white/20 mr-0.5">
+                  {idx + 1}
+                </span>
                 <Zap className="w-3 h-3" />
                 {style.name}
               </button>
@@ -978,23 +1362,44 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
           })}
         </div>
 
-        {/* Trajectory Curve Modifier */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-black px-3 py-1.5 border border-white/20">
-            <Compass className="w-4 h-4 text-[#ffe500]" />
-            <label className="text-xs text-slate-300 font-mono font-bold whitespace-nowrap shrink-0">
-              SPIN:
-            </label>
-            <input
-              type="range"
-              min="-1"
-              max="1"
-              step="0.1"
-              value={curveModifier}
-              onChange={(e) => setCurveModifier(parseFloat(e.target.value))}
-              className="w-20 accent-[#ffe500] cursor-pointer"
-            />
-            <span className="font-mono text-xs text-[#ffe500] font-bold w-7 tabular-nums">
+        {/* Trajectory Spin Controls (Quick Steppers + Slider) */}
+        <div className="flex items-center justify-between w-full md:w-auto gap-2">
+          {/* Quick Curve Steppers for Mobile */}
+          <div className="flex items-center gap-1 bg-black p-1 border border-white/20">
+            <button
+              onClick={() => {
+                triggerHaptic('spin');
+                sounds.playClick();
+                setCurveModifier((c) => Math.max(-1.0, +(c - 0.25).toFixed(2)));
+              }}
+              className="px-2 py-1 bg-white/10 hover:bg-white/20 text-white font-mono text-xs font-bold border border-white/20 active:scale-95"
+              title="Curve Left"
+            >
+              ↶
+            </button>
+            <button
+              onClick={() => {
+                triggerHaptic('spin');
+                sounds.playClick();
+                setCurveModifier(0);
+              }}
+              className="px-2 py-1 bg-white/10 hover:bg-white/20 text-[#ffe500] font-mono text-[10px] font-black border border-white/20 active:scale-95"
+              title="Reset Spin"
+            >
+              0
+            </button>
+            <button
+              onClick={() => {
+                triggerHaptic('spin');
+                sounds.playClick();
+                setCurveModifier((c) => Math.min(1.0, +(c + 0.25).toFixed(2)));
+              }}
+              className="px-2 py-1 bg-white/10 hover:bg-white/20 text-white font-mono text-xs font-bold border border-white/20 active:scale-95"
+              title="Curve Right"
+            >
+              ↷
+            </button>
+            <span className="font-mono text-xs text-[#ffe500] font-bold px-1.5 tabular-nums">
               {curveModifier > 0 ? `+${curveModifier}` : curveModifier}
             </span>
           </div>
@@ -1005,9 +1410,9 @@ export const DeskArena: React.FC<DeskArenaProps> = ({
               sounds.playClick();
               onExitMatch();
             }}
-            className="px-4 py-2 text-xs font-broadcast font-bold uppercase bg-white/10 hover:bg-white/20 text-slate-200 border border-white/20 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            className="px-3 sm:px-4 py-2 text-xs font-broadcast font-bold uppercase bg-white/10 hover:bg-white/20 text-slate-200 border border-white/20 transition-colors cursor-pointer active:scale-95 whitespace-nowrap shrink-0"
           >
-            Leave Match
+            Leave
           </button>
         </div>
       </div>

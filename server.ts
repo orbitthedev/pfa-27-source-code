@@ -23,6 +23,7 @@ interface ClientSession {
   roomCode: string | null;
   playerName: string;
   isHost: boolean;
+  platform: 'mobile' | 'desktop';
 }
 
 interface Room {
@@ -34,12 +35,15 @@ interface Room {
   status: 'WAITING' | 'READY' | 'PLAYING';
   hostPen: string;
   guestPen: string | null;
+  hostPlatform: 'mobile' | 'desktop';
+  guestPlatform: 'mobile' | 'desktop' | null;
+  crossplay: boolean;
 }
 
 const clients = new Map<WebSocket, ClientSession>();
 const rooms = new Map<string, Room>();
 
-// Health / API check
+// Health / API check with room listing
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ok',
@@ -49,12 +53,26 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
+app.get('/api/rooms', (_req, res) => {
+  const publicRooms = Array.from(rooms.values())
+    .filter((r) => r.status === 'WAITING')
+    .map((r) => ({
+      code: r.code,
+      hostName: r.hostName,
+      hostPen: r.hostPen,
+      hostPlatform: r.hostPlatform,
+      crossplay: r.crossplay,
+    }));
+  res.json({ rooms: publicRooms });
+});
+
 wss.on('connection', (ws: WebSocket) => {
   const session: ClientSession = {
     ws,
     roomCode: null,
     playerName: 'Player',
     isHost: false,
+    platform: 'desktop',
   };
   clients.set(ws, session);
 
@@ -68,6 +86,8 @@ wss.on('connection', (ws: WebSocket) => {
           const roomCode = Math.random().toString(36).substring(2, 7).toUpperCase();
           const hostName = data.playerName || 'Player 1';
           const hostPen = data.penId || 'ballpoint_classic';
+          const hostPlatform: 'mobile' | 'desktop' = data.platform === 'mobile' ? 'mobile' : 'desktop';
+          const crossplay: boolean = data.crossplay !== false;
 
           const room: Room = {
             code: roomCode,
@@ -78,19 +98,44 @@ wss.on('connection', (ws: WebSocket) => {
             status: 'WAITING',
             hostPen,
             guestPen: null,
+            hostPlatform,
+            guestPlatform: null,
+            crossplay,
           };
           rooms.set(roomCode, room);
 
           session.roomCode = roomCode;
           session.playerName = hostName;
           session.isHost = true;
+          session.platform = hostPlatform;
 
           ws.send(
             JSON.stringify({
               type: 'ROOM_CREATED',
               roomCode,
               role: 'host',
-              message: `Room ${roomCode} created. Share code with opponent!`,
+              platform: hostPlatform,
+              crossplay,
+              message: `Room ${roomCode} created (${crossplay ? 'Crossplay ON' : 'Same-Platform Only'}). Share code with opponent!`,
+            })
+          );
+          break;
+        }
+
+        case 'LIST_ROOMS': {
+          const openRooms = Array.from(rooms.values())
+            .filter((r) => r.status === 'WAITING')
+            .map((r) => ({
+              code: r.code,
+              hostName: r.hostName,
+              hostPen: r.hostPen,
+              hostPlatform: r.hostPlatform,
+              crossplay: r.crossplay,
+            }));
+          ws.send(
+            JSON.stringify({
+              type: 'ROOMS_LIST',
+              rooms: openRooms,
             })
           );
           break;
@@ -101,6 +146,8 @@ wss.on('connection', (ws: WebSocket) => {
           const room = rooms.get(targetCode);
           const guestName = data.playerName || 'Player 2';
           const guestPen = data.penId || 'gel_velocity';
+          const guestPlatform: 'mobile' | 'desktop' = data.platform === 'mobile' ? 'mobile' : 'desktop';
+          const guestCrossplay: boolean = data.crossplay !== false;
 
           if (!room) {
             ws.send(
@@ -122,14 +169,37 @@ wss.on('connection', (ws: WebSocket) => {
             return;
           }
 
+          // Enforce Crossplay restrictions
+          if (!room.crossplay && room.hostPlatform !== guestPlatform) {
+            ws.send(
+              JSON.stringify({
+                type: 'ERROR',
+                message: `Crossplay disabled by host. Room only accepts ${room.hostPlatform.toUpperCase()} players (You are on ${guestPlatform.toUpperCase()}).`,
+              })
+            );
+            return;
+          }
+
+          if (!guestCrossplay && room.hostPlatform !== guestPlatform) {
+            ws.send(
+              JSON.stringify({
+                type: 'ERROR',
+                message: `Your settings specify SAME PLATFORM ONLY (${guestPlatform.toUpperCase()}), but the room host is on ${room.hostPlatform.toUpperCase()}.`,
+              })
+            );
+            return;
+          }
+
           room.guest = ws;
           room.guestName = guestName;
           room.guestPen = guestPen;
+          room.guestPlatform = guestPlatform;
           room.status = 'READY';
 
           session.roomCode = targetCode;
           session.playerName = guestName;
           session.isHost = false;
+          session.platform = guestPlatform;
 
           // Notify guest
           ws.send(
@@ -139,6 +209,9 @@ wss.on('connection', (ws: WebSocket) => {
               role: 'guest',
               opponentName: room.hostName,
               opponentPen: room.hostPen,
+              opponentPlatform: room.hostPlatform,
+              myPlatform: guestPlatform,
+              crossplay: room.crossplay,
             })
           );
 
@@ -149,6 +222,9 @@ wss.on('connection', (ws: WebSocket) => {
               roomCode: targetCode,
               opponentName: guestName,
               opponentPen: guestPen,
+              opponentPlatform: guestPlatform,
+              myPlatform: room.hostPlatform,
+              crossplay: room.crossplay,
             })
           );
           break;

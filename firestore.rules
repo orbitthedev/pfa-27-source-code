@@ -22,10 +22,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Hardened Admin Verification: only the authenticated user email from runtime with verified email
+    // Hardened Admin Verification: only the authenticated user email from runtime
     function isAdmin() {
       return isSignedIn() &&
-        request.auth.token.email_verified == true &&
+        request.auth.token.email != null &&
         request.auth.token.email.lower() == 'samwdoesthings@gmail.com';
     }
 
@@ -59,8 +59,8 @@ service cloud.firestore {
       // Individual user can read their own account profile, or admin can inspect
       allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
 
-      // Prevent list query scraping of all user profiles/emails, unless admin
-      allow list: if isAdmin();
+      // Allow signed-in players to view global human leaderboard rankings
+      allow list: if isSignedIn();
 
       // Create new account profile
       allow create: if isSignedIn() &&

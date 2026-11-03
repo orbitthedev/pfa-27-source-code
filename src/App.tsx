@@ -4,12 +4,14 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { GameView, PlayerProfile, Tournament, TournamentMatch } from './types/game';
+import { GameView, PlayerProfile, Tournament, TournamentMatch, BotDifficulty, MatchMode } from './types/game';
 import { awardMatchWin, unlockItemInProfile } from './utils/storage';
 import { sounds } from './utils/audio';
+import { BOT_DIFFICULTIES } from './data/initialData';
 import { AuthProvider, useAuth } from './firebase/AuthContext';
 import { SignInGate } from './components/SignInGate';
 import { Navbar } from './components/Navbar';
+import { MobileNavDock } from './components/MobileNavDock';
 import { HubDashboard } from './components/HubDashboard';
 import { DeskArena } from './components/DeskArena';
 import { TournamentBracketView } from './components/TournamentBracketView';
@@ -17,19 +19,36 @@ import { GeometryBoxStore } from './components/GeometryBoxStore';
 import { PenLocker } from './components/PenLocker';
 import { MultiplayerLobby } from './components/MultiplayerLobby';
 import { AdminPanelModal } from './components/AdminPanelModal';
+import { BotLabModal } from './components/BotLabModal';
+import { detectDevicePlatform } from './utils/device';
 
 function MainAppContent() {
   const { user, profile, loading, signOutUser, updateProfileData, isAdminUser, godModePower } = useAuth();
   const [currentView, setCurrentView] = useState<GameView>('HUB');
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
+  const [isBotLabOpen, setIsBotLabOpen] = useState<boolean>(false);
+  const [activeBotDifficulty, setActiveBotDifficulty] = useState<BotDifficulty>('NORMAL');
+  const [activeBotPenId, setActiveBotPenId] = useState<string>('pilot_g2');
 
   // Match setup state
-  const [matchMode, setMatchMode] = useState<'RANKED' | 'TOURNAMENT' | 'PASS_PLAY' | 'ONLINE_ROOM'>('RANKED');
+  const [matchMode, setMatchMode] = useState<MatchMode>('RANKED');
   const [activeOpponentName, setActiveOpponentName] = useState<string>('ApexStriker_X');
   const [activeOpponentAvatar, setActiveOpponentAvatar] = useState<string>('🎯');
+  const [activeOpponentPlatform, setActiveOpponentPlatform] = useState<'mobile' | 'desktop'>('desktop');
   const [currentActiveTournament, setCurrentActiveTournament] = useState<Tournament | null>(null);
   const [currentActiveMatch, setCurrentActiveMatch] = useState<TournamentMatch | null>(null);
+
+  // Platform and crossplay preferences
+  const currentPlatform: 'mobile' | 'desktop' = profile?.platform || detectDevicePlatform();
+  const crossplaySetting = profile?.crossplaySetting || 'CROSSPLAY_ENABLED';
+
+  const handleToggleCrossplay = () => {
+    updateProfileData((prev) => ({
+      ...prev,
+      crossplaySetting: prev.crossplaySetting === 'CROSSPLAY_ENABLED' ? 'SAME_PLATFORM_ONLY' : 'CROSSPLAY_ENABLED',
+    }));
+  };
 
   // Online WebSocket state
   const wsRef = useRef<WebSocket | null>(null);
@@ -59,11 +78,13 @@ function MainAppContent() {
         if (msg.type === 'OPPONENT_JOINED') {
           setActiveOpponentName(msg.opponentName || 'Online Rival');
           setActiveOpponentAvatar('⚡');
+          if (msg.opponentPlatform) setActiveOpponentPlatform(msg.opponentPlatform);
           setMatchMode('ONLINE_ROOM');
           setCurrentView('MATCH');
         } else if (msg.type === 'ROOM_JOINED') {
           setActiveOpponentName(msg.opponentName || 'Room Host');
           setActiveOpponentAvatar('👑');
+          if (msg.opponentPlatform) setActiveOpponentPlatform(msg.opponentPlatform);
           setMatchMode('ONLINE_ROOM');
           setCurrentView('MATCH');
         } else if (msg.type === 'OPPONENT_FLICKED') {
@@ -89,16 +110,19 @@ function MainAppContent() {
   };
 
   const handleQuickRanked = () => {
-    setMatchMode('RANKED');
-    const randomRivals = [
-      { name: 'DeskTitan_44', avatar: '🌪️' },
-      { name: 'SpinPhantom', avatar: '🌀' },
-      { name: 'BicBanger_99', avatar: '💥' },
-      { name: 'VelocityKid', avatar: '⚡' },
-    ];
-    const picked = randomRivals[Math.floor(Math.random() * randomRivals.length)];
-    setActiveOpponentName(picked.name);
-    setActiveOpponentAvatar(picked.avatar);
+    // Ranked Duel: Redirects exclusively to live human multiplayer matchmaking lobby
+    sounds.playClick();
+    setCurrentView('MULTIPLAYER');
+  };
+
+  const handleStartBotBattle = (difficulty: BotDifficulty, botPenId: string) => {
+    setMatchMode('BOT_BATTLE');
+    setActiveBotDifficulty(difficulty);
+    setActiveBotPenId(botPenId);
+    const diffConfig =
+      BOT_DIFFICULTIES.find((d) => d.id === difficulty) || BOT_DIFFICULTIES[2];
+    setActiveOpponentName(diffConfig.name);
+    setActiveOpponentAvatar(diffConfig.avatar);
     setCurrentView('MATCH');
   };
 
@@ -132,6 +156,8 @@ function MainAppContent() {
               type: 'CREATE_ROOM',
               playerName: profile.username,
               penId: profile.equippedPenId,
+              platform: currentPlatform,
+              crossplay: crossplaySetting === 'CROSSPLAY_ENABLED',
             })
           );
         } else {
@@ -141,6 +167,8 @@ function MainAppContent() {
               roomCode,
               playerName: profile.username,
               penId: profile.equippedPenId,
+              platform: currentPlatform,
+              crossplay: crossplaySetting === 'CROSSPLAY_ENABLED',
             })
           );
         }
@@ -171,6 +199,15 @@ function MainAppContent() {
 
     // Award XP and Paperclips, sync to cloud
     updateProfileData((prev) => {
+      if (matchMode === 'BOT_BATTLE') {
+        // Isolated practice mode: grants training paperclips & XP without altering division ladder points or leaderboard rank
+        return {
+          ...prev,
+          paperclips: isVictory ? prev.paperclips + 20 : prev.paperclips + 5,
+          xp: prev.xp + (isVictory ? 30 : 10),
+          totalMatches: prev.totalMatches + 1,
+        };
+      }
       const { updatedProfile } = awardMatchWin(
         prev,
         isVictory,
@@ -252,16 +289,21 @@ function MainAppContent() {
         onSignOut={signOutUser}
         isAdminUser={isAdminUser}
         onOpenAdminPanel={() => setIsAdminModalOpen(true)}
+        platform={currentPlatform}
+        crossplaySetting={crossplaySetting}
+        onToggleCrossplay={handleToggleCrossplay}
+        onOpenBotLab={() => setIsBotLabOpen(true)}
       />
 
       {/* Main View Router */}
-      <main className="flex-1 pb-16">
+      <main className="flex-1 pb-28 lg:pb-16 px-1 sm:px-2">
         {currentView === 'HUB' && (
           <HubDashboard
             profile={profile}
             onNavigate={(view) => setCurrentView(view)}
             onQuickRankedMatch={handleQuickRanked}
             onStartPassAndPlay={handleStartPassAndPlay}
+            onOpenBotLab={() => setIsBotLabOpen(true)}
           />
         )}
 
@@ -269,6 +311,8 @@ function MainAppContent() {
           <DeskArena
             mode={matchMode}
             playerProfile={profile}
+            botDifficulty={activeBotDifficulty}
+            botPenId={activeBotPenId}
             opponentName={activeOpponentName}
             opponentAvatar={activeOpponentAvatar}
             onMatchComplete={handleMatchComplete}
@@ -279,6 +323,9 @@ function MainAppContent() {
             onSendFlick={handleSendFlickOnline}
             incomingOnlineFlick={incomingOnlineFlick}
             godModePower={godModePower}
+            playerPlatform={currentPlatform}
+            opponentPlatform={activeOpponentPlatform}
+            crossplay={crossplaySetting === 'CROSSPLAY_ENABLED'}
           />
         )}
 
@@ -318,6 +365,9 @@ function MainAppContent() {
             profile={profile}
             onJoinRoom={handleJoinOnlineRoom}
             onStartRankedMatch={handleQuickRanked}
+            crossplaySetting={crossplaySetting}
+            onToggleCrossplay={handleToggleCrossplay}
+            platform={currentPlatform}
           />
         )}
 
@@ -326,12 +376,15 @@ function MainAppContent() {
             profile={profile}
             onJoinRoom={handleJoinOnlineRoom}
             onStartRankedMatch={handleQuickRanked}
+            crossplaySetting={crossplaySetting}
+            onToggleCrossplay={handleToggleCrossplay}
+            platform={currentPlatform}
           />
         )}
       </main>
 
       {/* Broadcast Footer */}
-      <footer className="border-t-4 border-black py-4 px-6 bg-white text-black text-xs font-mono flex flex-col sm:flex-row items-center justify-between gap-3 max-w-6xl mx-auto w-full mb-4 shadow-brutal-yellow">
+      <footer className="border-t-4 border-black py-4 px-6 bg-white text-black text-xs font-mono flex flex-col sm:flex-row items-center justify-between gap-3 max-w-6xl mx-auto w-full mb-20 lg:mb-4 shadow-brutal-yellow">
         <div className="flex items-center gap-2">
           <span className="font-broadcast text-2xl font-black italic tracking-wider text-black">
             PFA <span className="bg-[#ffe500] px-1 border border-black">27</span>
@@ -339,16 +392,38 @@ function MainAppContent() {
           <span className="font-bold">· FIGHTER PASSPORT: {user.email}</span>
         </div>
         <div className="flex items-center gap-4 text-neutral-700 font-bold">
-          <span>CLOUD SYNC ACTIVE</span>
+          <span className="flex items-center gap-1">
+            <span>{currentPlatform === 'mobile' ? '📱 MOBILE' : '🖥️ DESKTOP'}</span>
+            <span>•</span>
+            <span className={crossplaySetting === 'CROSSPLAY_ENABLED' ? 'text-emerald-700' : 'text-blue-700'}>
+              {crossplaySetting === 'CROSSPLAY_ENABLED' ? 'CROSSPLAY ON' : 'SOLO PLATFORM'}
+            </span>
+          </span>
           <span>·</span>
           <span>SEASON 2027</span>
         </div>
       </footer>
 
+      {/* Mobile Navigation Sticky Dock */}
+      <MobileNavDock
+        currentView={currentView}
+        onNavigate={(view) => setCurrentView(view)}
+        onOpenBotLab={() => setIsBotLabOpen(true)}
+        platform={currentPlatform}
+      />
+
       {/* Admin Developer Console Modal */}
       {isAdminModalOpen && (
         <AdminPanelModal onClose={() => setIsAdminModalOpen(false)} />
       )}
+
+      {/* AI Bot Sparring Lab Modal */}
+      <BotLabModal
+        isOpen={isBotLabOpen}
+        onClose={() => setIsBotLabOpen(false)}
+        profile={profile}
+        onStartBotMatch={handleStartBotBattle}
+      />
     </div>
   );
 }

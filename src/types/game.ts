@@ -145,6 +145,9 @@ export interface Tournament {
   description: string;
 }
 
+export type DevicePlatform = 'mobile' | 'desktop';
+export type CrossplaySetting = 'CROSSPLAY_ENABLED' | 'SAME_PLATFORM_ONLY';
+
 export interface PlayerProfile {
   username: string;
   level: number;
@@ -164,6 +167,12 @@ export interface PlayerProfile {
   unlockedFlickStyles: string[];
   role?: 'ADMIN' | 'PLAYER';
   isAdmin?: boolean;
+  platform?: DevicePlatform;
+  crossplaySetting?: CrossplaySetting;
 }
 
-export type GameView = 'HUB' | 'MATCH' | 'TOURNAMENT' | 'GEOMETRY_STORE' | 'LOCKER' | 'MULTIPLAYER' | 'DIVISIONS';
+export type BotDifficulty = 'DUMMY' | 'ROOKIE' | 'NORMAL' | 'HARD' | 'CYBORG_APEX';
+
+export type MatchMode = 'RANKED' | 'TOURNAMENT' | 'PASS_PLAY' | 'ONLINE_ROOM' | 'BOT_BATTLE';
+
+export type GameView = 'HUB' | 'MATCH' | 'TOURNAMENT' | 'GEOMETRY_STORE' | 'LOCKER' | 'MULTIPLAYER' | 'DIVISIONS' | 'BOT_LAB';
